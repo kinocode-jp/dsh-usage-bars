@@ -29,7 +29,8 @@
   "scripts": {
     "test": "node --check lib/index.js && node --check lib/sources.js && node --check lib/client.js && node --test test/*.test.mjs",
     "test:contract": "DSH_REQUIRE_RUNTIME=1 node --test test/rpc-host.test.mjs test/parity.test.mjs",
-    "sync-catalog": "node ../dsh-provider-catalog/scripts/sync.mjs"
+    "sync-catalog": "node ../dsh-provider-catalog/scripts/sync.mjs",
+    "prepublishOnly": "npm test"
   },
   "files": [
     "lib",
