@@ -294,3 +294,22 @@ test('環境変数由来でも同じ値ならファイルへ保存して移行�
   assert.deepEqual(JSON.parse(await fs.readFile(configPath, 'utf8')).keys, {})
 })
 
+
+test('Antigravity: モデルルートの自前接続にアカウントがあれば、その残り枠を使い、無ければアプリから読む', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'usage-bars-agy-'))
+  let quota = { status: 'ok', email: 'a@example.com', bars: [{ model: 'gemini-3.8-flash-tiered', label: 'Gemini 3.8 Flash', remainingFraction: 0.25, resetTime: '2026-10-23T00:00:00Z' }] }
+  let localCalls = 0
+  const service = createUsageService({ sources: { antigravity: async () => { localCalls++; return value('antigravity') } }, configPath: path.join(dir, 'config.json'), historyPath: path.join(dir, 'history.json'),
+    modelRoutes: { snapshot: () => ({ routes: {} }), antigravityQuota: async () => quota } })
+  t.after(async () => { service.dispose(); await fs.rm(dir, { recursive: true, force: true }) })
+  const first = (await service.getUsage()).sources.find(source => source.id === 'antigravity')
+  assert.deepEqual([first.status, first.bars[0].usedPercent, first.bars[0].label, localCalls], ['ok', 75, 'Gemini 3.8 Flash', 0])
+  assert.match(first.plan, /a@example\.com/)
+  service.dispose()
+  quota = { status: 'off', bars: [] }
+  const second = createUsageService({ sources: { antigravity: async () => { localCalls++; return value('antigravity') } }, configPath: path.join(dir, 'config.json'), historyPath: path.join(dir, 'history.json'),
+    modelRoutes: { snapshot: () => ({ routes: {} }), antigravityQuota: async () => quota } })
+  t.after(() => second.dispose())
+  await second.getUsage()
+  assert.equal(localCalls, 1)
+})
