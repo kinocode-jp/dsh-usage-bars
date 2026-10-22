@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "用量条 (dsh-usage-bars)",
+    "description": "在侧边栏以进度条显示 Codex、Claude、Antigravity、DeepSeek 等的剩余用量。"
+  }
+}

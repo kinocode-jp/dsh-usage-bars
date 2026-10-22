@@ -8,7 +8,8 @@
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./typert": "./lib/typert.host.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "dsh": {
     "engines": {
@@ -34,7 +35,8 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "locale/*.json"
   ],
   "keywords": [
     "dsh",
