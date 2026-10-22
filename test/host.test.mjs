@@ -313,3 +313,18 @@ test('Antigravity: モデルルートの自前接続にアカウントがあれ�
   await second.getUsage()
   assert.equal(localCalls, 1)
 })
+
+test('Antigravity: モデルルートでオフ・再ログインが必要なときは、アプリの値で隠さずにそのまま出す', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'usage-bars-agy2-'))
+  t.after(() => fs.rm(dir, { recursive: true, force: true }))
+  let localCalls = 0
+  const make = quota => createUsageService({ sources: { antigravity: async () => { localCalls++; return value('antigravity') } }, configPath: path.join(dir, 'config.json'), historyPath: path.join(dir, 'history.json'),
+    modelRoutes: { snapshot: () => ({ routes: {} }), antigravityQuota: async () => quota } })
+  const off = make({ status: 'disabled', error: 'オフです', bars: [] })
+  t.after(() => off.dispose())
+  assert.equal((await off.getUsage()).sources.find(s => s.id === 'antigravity').status, 'off')
+  const relogin = make({ status: 'error', error: '再ログインが必要です', needsLogin: true, bars: [] })
+  t.after(() => relogin.dispose())
+  const shown = (await relogin.getUsage()).sources.find(s => s.id === 'antigravity')
+  assert.deepEqual([shown.status, shown.error, localCalls], ['error', '再ログインが必要です', 0])
+})
