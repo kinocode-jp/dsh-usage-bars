@@ -1,0 +1,51 @@
+{
+  "name": "@kinocode/dsh-usage-bars",
+  "version": "0.1.10",
+  "description": "Codex / Claude / Antigravity / DeepSeek の残り使用量を、サイドバーのバーで表示する DeepSeek Harness 用プラグイン（CodexBar 風）。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./typert": "./lib/typert.host.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.0-rc.1"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "test": "node --check lib/index.js && node --check lib/sources.js && node --check lib/client.js && node --test test/*.test.mjs",
+    "test:contract": "DSH_REQUIRE_RUNTIME=1 node --test test/rpc-host.test.mjs test/parity.test.mjs",
+    "sync-catalog": "node ../dsh-provider-catalog/scripts/sync.mjs"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "usage",
+    "quota",
+    "codex",
+    "claude",
+    "antigravity"
+  ],
+  "license": "MIT",
+  "author": "kinocode"
+}
