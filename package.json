@@ -49,5 +49,13 @@
     "antigravity"
   ],
   "license": "MIT",
-  "author": "kinocode"
+  "author": "kinocode",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kinocode-jp/dsh-usage-bars.git"
+  },
+  "homepage": "https://github.com/kinocode-jp/dsh-usage-bars#readme",
+  "bugs": {
+    "url": "https://github.com/kinocode-jp/dsh-usage-bars/issues"
+  }
 }
