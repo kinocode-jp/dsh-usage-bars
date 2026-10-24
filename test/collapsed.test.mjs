@@ -12,12 +12,20 @@ const fakeReact = {
   useState: initial => [initial, () => {}],
   useEffect() {}, useCallback: fn => fn, useRef: () => ({ current: null }),
 }
-function load({ withTooltip = true, collapsed = null, expanded = false } = {}) {
+const storageWrites = []
+let stripState = null
+function load({ withTooltip = true, collapsed = null, expanded = false, stripCollapsed = null, tab = null } = {}) {
+  stripState = stripCollapsed
   let loaded
   const window = { __ModuleLoader__: { load: m => { loaded = m } } }
-  const localStorage = { getItem: () => collapsed, setItem() {}, removeItem() {} }
+  const localStorage = {
+    getItem: key => (key === 'dsh-usage-bars.strip-collapsed' ? stripState : collapsed),
+    setItem: (key, value) => storageWrites.push([key, value]),
+    removeItem: key => storageWrites.push([key, null]),
+  }
   new Function('window', 'document', 'localStorage', 'setInterval', 'clearInterval', source)(window, { getElementById: () => true }, localStorage, () => 0, () => {})
-  const mod = loaded.factory(name => name === 'react' ? { ...fakeReact, useState: initial => [initial === false ? expanded : initial, () => {}] } : withTooltip ? { Tooltip } : (() => { throw new Error('no primitives') })())
+  const useState = initial => { const value = typeof initial === 'function' ? initial() : initial; if (tab && value === 'services') return [tab, () => {}]; return [value === false ? expanded : value, () => {}] }
+  const mod = loaded.factory(name => name === 'react' ? { ...fakeReact, useState } : withTooltip ? { Tooltip } : (() => { throw new Error('no primitives') })())
   return mod.__test
 }
 function render(node, out = []) {
@@ -340,6 +348,7 @@ test('横バー: スクロールバーは動かしている間だけ出し、止
   const strip = t.css.split('\n').find(rule => rule.startsWith('.ub-strip{'))
   assert.match(strip, /scrollbar-color:transparent transparent/, '止まっているときは透明')
   assert.match(t.css, /\.ub-strip\.is-scrolling\{scrollbar-color:rgba/, '動かしている間だけ色を付ける')
+  assert.match(t.css, /@media \(hover:hover\) and \(pointer:fine\)\{\.ub-strip:hover\{scrollbar-color:rgba/, 'マウスではホバー中も(タッチではタップ後に残さない)')
   assert.match(t.css, /\.ub-strip::-webkit-scrollbar-thumb\{background:transparent/)
   const listeners = {}
   const classes = new Set()
@@ -368,15 +377,99 @@ test('横バー: 表示中も右端のアイコンで折りたためる', () => 
   const toggle = wrap.children.at(-1)
   assert.ok(hasClass(toggle, 'ub-strip-toggle'), 'アイコンは右端(最後の子)')
   assert.equal(toggle.props['aria-expanded'], true)
-  assert.equal(toggle.props['aria-label'], '使用量を折りたたむ')
+  assert.equal(toggle.props['aria-label'], '使用量バー', 'a fixed name distinct from the sidebar and corner buttons; aria-expanded carries the state')
+  assert.equal(toggle.props.title, '使用量バーの表示を切り替え')
   assert.ok(nodes.some(n => hasClass(n, 'ub-strip-item')))
 
-  const closed = load({ expanded: true }); closed.store.cfg = cfgOf({ strip: true }); closed.store.data = stripData()
+  const closed = load({ stripCollapsed: '1' }); closed.store.cfg = cfgOf({ strip: true }); closed.store.data = stripData()
   const shut = render(closed.QuotaStrip())
   assert.ok(hasClass(shut.find(n => hasClass(n, 'ub-strip-wrap')), 'collapsed'))
   assert.equal(shut.filter(n => hasClass(n, 'ub-strip-item')).length, 0, '折りたたむと項目を隠す')
   const reopen = shut.find(n => hasClass(n, 'ub-strip-toggle'))
   assert.equal(reopen.props['aria-expanded'], false)
-  assert.equal(reopen.props['aria-label'], '使用量を表示')
+  assert.equal(reopen.props.title, '使用量バーの表示を切り替え')
+  // Pressing it saves the new state for the next time (and for the other strips).
+  storageWrites.length = 0
+  reopen.props.onClick()
+  assert.deepEqual(storageWrites, [['dsh-usage-bars.strip-collapsed', '0']])
+  storageWrites.length = 0
+  toggle.props.onClick()
+  assert.deepEqual(storageWrites, [['dsh-usage-bars.strip-collapsed', '1']])
   assert.match(closed.css, /\.ub-strip-wrap\.collapsed\{justify-content:flex-end\}/, '畳んでもアイコンは右端')
+})
+
+test('横バー: 設定でオンに戻すと、畳んだ記憶を消して開いた状態で出す(保存できたときだけ)', async () => {
+  const t = load({ stripCollapsed: '1', tab: 'notify' })
+  t.store.cfg = cfgOf({ strip: false }); t.store.data = { sources: [] }
+  let saveOk = true
+  t.store.bind({ getConfig: async () => ({ ok: true, value: cfgOf() }), getUsage: async () => ({ ok: true, value: { sources: [] } }), updateConfig: async () => (saveOk ? { ok: true, value: cfgOf({ strip: true }) } : { ok: false, error: { message: 'no' } }) })
+  t.store.cfg = cfgOf({ strip: false })
+  const switchFor = () => render(t.UsageSettings()).find(n => n.props?.role === 'switch' && n.props['aria-label'] === '入力欄の上に横バーを表示')
+  storageWrites.length = 0
+  const sw = switchFor()
+  assert.ok(sw, 'the strip switch on the notify tab')
+  {
+    saveOk = false
+    sw.props.onClick(); await new Promise(r => setTimeout(r, 0))
+    assert.deepEqual(storageWrites, [], 'a failed save leaves the remembered state alone')
+    saveOk = true
+    sw.props.onClick(); await new Promise(r => setTimeout(r, 0))
+    assert.deepEqual(storageWrites, [['dsh-usage-bars.strip-collapsed', null]], 'switched back on: open again')
+  }
+  // A failed save of any switch leaves no unhandled rejection (the reason goes to the settings message).
+  const unhandled = []
+  const onUnhandled = reason => unhandled.push(reason)
+  process.on('unhandledRejection', onUnhandled)
+  saveOk = false
+  for (const sw of render(t.UsageSettings()).filter(n => n.props?.role === 'switch')) sw.props.onClick()
+  await new Promise(r => setTimeout(r, 20))
+  process.off('unhandledRejection', onUnhandled)
+  assert.deepEqual(unhandled, [])
+  saveOk = true
+  // Collapsed again by the reader while the save runs: the save does not reopen it.
+  t.store.cfg = cfgOf({ strip: false })
+  let release
+  t.store.bind({ getConfig: async () => ({ ok: true, value: cfgOf() }), getUsage: async () => ({ ok: true, value: { sources: [] } }), updateConfig: () => new Promise(r => { release = () => r({ ok: true, value: cfgOf({ strip: true }) }) }) })
+  t.store.cfg = cfgOf({ strip: false })
+  stripState = null
+  t.store.data = stripData()
+  switchFor().props.onClick()
+  t.store.cfg = cfgOf({ strip: true }) // a refresh during the save already shows the strip
+  render(t.QuotaStrip()).find(n => hasClass(n, 'ub-strip-toggle')).props.onClick() // collapsed during the save
+  storageWrites.length = 0
+  release(); await new Promise(r => setTimeout(r, 0))
+  assert.deepEqual(storageWrites, [], 'kept collapsed')
+  // Opened and collapsed again during a save (back to the same value): still the reader's choice.
+  t.store.bind({ getConfig: async () => ({ ok: true, value: cfgOf() }), getUsage: async () => ({ ok: true, value: { sources: [] } }), updateConfig: () => new Promise(r => { release = () => r({ ok: true, value: cfgOf({ strip: true }) }) }) })
+  t.store.cfg = cfgOf({ strip: false }); t.store.data = stripData()
+  stripState = '1'
+  switchFor().props.onClick()
+  t.store.cfg = cfgOf({ strip: true })
+  const strip = render(t.QuotaStrip()).find(n => hasClass(n, 'ub-strip-toggle'))
+  strip.props.onClick() // open
+  strip.props.onClick() // collapse again
+  storageWrites.length = 0
+  release(); await new Promise(r => setTimeout(r, 0))
+  assert.deepEqual(storageWrites, [], 'the save does not reopen it')
+  t.store.bind({ getConfig: async () => ({ ok: true, value: cfgOf() }), getUsage: async () => ({ ok: true, value: { sources: [] } }), updateConfig: async () => ({ ok: true, value: cfgOf({ strip: true }) }) })
+  t.store.cfg = cfgOf({ strip: true })
+  // Switching it off leaves the remembered state alone.
+  t.store.cfg = cfgOf({ strip: true })
+  storageWrites.length = 0
+  switchFor().props.onClick(); await new Promise(r => setTimeout(r, 0))
+  assert.deepEqual(storageWrites, [])
+})
+
+test('横バー: 開閉を保存できない環境では、このページの中の値で揃える(後から出た横バーも)', () => {
+  let loaded
+  const window = { __ModuleLoader__: { load: m => { loaded = m } }, addEventListener() {}, removeEventListener() {}, dispatchEvent() {} }
+  const localStorage = { getItem: () => '0', setItem() { throw new Error('QuotaExceededError') }, removeItem() { throw new Error('QuotaExceededError') } }
+  new Function('window', 'document', 'localStorage', 'setInterval', 'clearInterval', 'CustomEvent', source)(window, { getElementById: () => true }, localStorage, () => 0, () => {}, function CustomEvent() {})
+  const react = { ...fakeReact, useState: initial => { const value = typeof initial === 'function' ? initial() : initial; return [value, () => {}] } }
+  const t = loaded.factory(name => name === 'react' ? react : { Tooltip }).__test
+  t.store.cfg = cfgOf({ strip: true }); t.store.data = stripData()
+  const toggle = render(t.QuotaStrip()).find(n => hasClass(n, 'ub-strip-toggle'))
+  toggle.props.onClick() // collapse; the write fails
+  const later = render(t.QuotaStrip()).find(n => hasClass(n, 'ub-strip-wrap'))
+  assert.ok(hasClass(later, 'collapsed'), 'a strip drawn afterwards is collapsed too, though storage still says "0"')
 })

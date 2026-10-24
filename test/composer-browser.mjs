@@ -11,7 +11,8 @@ try {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
-  await page.setContent('<style>body{margin:0}.composer{display:flex;justify-content:flex-end;width:calc(100% - 24px);margin:12px;gap:4px}.sibling{flex:none;width:100px}</style><div class="composer"><div class="sibling">composer tools</div><div id="mount" style="display:flex;min-width:0;flex:1;justify-content:flex-end"></div></div>')
+  await page.route('https://usage.test/**', route => route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: '<!doctype html><meta charset=utf-8><style>body{margin:0}.composer{display:flex;justify-content:flex-end;width:calc(100% - 24px);margin:12px;gap:4px}.sibling{flex:none;width:100px}</style><div class="composer"><div class="sibling">composer tools</div><div id="mount" style="display:flex;min-width:0;flex:1;justify-content:flex-end"></div></div>' }))
+  await page.goto('https://usage.test/')
   await page.addScriptTag({ path: deps + '/react@18.3.1/node_modules/react/umd/react.development.js' })
   await page.addScriptTag({ path: deps + '/react-dom@18.3.1_react@18.3.1/node_modules/react-dom/umd/react-dom.development.js' })
   await page.evaluate(() => {
@@ -26,7 +27,7 @@ try {
     window.root = ReactDOM.createRoot(document.querySelector('#mount'))
     root.render(React.createElement(React.StrictMode, null, React.createElement(t.CornerChips)))
   })
-  const toggle = page.getByRole('button', { name: '使用量を表示' })
+  const toggle = page.locator('.ub-chips-toggle')
   await toggle.waitFor()
   assert.equal(await page.locator('.ub-chip').count(), 0)
   assert.equal(await page.locator('.ub-chips svg').count(), 1)
@@ -52,7 +53,9 @@ try {
   await scroller.evaluate(n => { n.scrollLeft = 100 })
   await page.waitForFunction(() => document.querySelector('.ub-chips-scroll').classList.contains('is-scrolling'))
   await page.waitForFunction(() => !document.querySelector('.ub-chips-scroll').classList.contains('is-scrolling'))
-  await page.getByRole('button', { name: '使用量を折りたたむ' }).focus()
+  assert.equal(await toggle.getAttribute('aria-label'), '使用量の一覧')
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'true')
+  await toggle.focus()
   await page.keyboard.press('Enter')
   assert.equal(await page.locator('.ub-chip').count(), 0)
   await page.keyboard.press('Space')
@@ -69,4 +72,71 @@ try {
   await page.evaluate(() => root.unmount())
   assert.deepEqual(errors, [])
   console.log('PASS: real React StrictMode + Chromium: compact/tap/keyboard, full values, 320/390/768/1280 alignment, scrolling, config transitions, cleanup')
+
+  // The strip above the composer: two copies (a split view), a long row that scrolls sideways.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.evaluate(() => {
+    localStorage.removeItem('dsh-usage-bars.strip-collapsed')
+    const t = plugin.__test
+    t.store.cfg = { strip: true, enabled: {}, order: [] }
+    document.querySelector('#mount').style.cssText = 'display:block'
+    document.querySelector('#mount').innerHTML = '<div id="s1" style="width:360px;display:flex;flex-direction:column"></div><div id="s2" style="width:360px;display:flex;flex-direction:column"></div>'
+    window.strips = [ReactDOM.createRoot(document.querySelector('#s1')), ReactDOM.createRoot(document.querySelector('#s2'))]
+    strips.forEach(r => r.render(React.createElement(React.StrictMode, null, React.createElement(t.QuotaStrip))))
+  })
+  const strip = page.locator('#s1 .ub-strip')
+  await strip.waitFor()
+  assert.ok(await strip.evaluate(n => n.scrollWidth > n.clientWidth), 'the long row overflows sideways')
+  // The scrollbar shows while moving and goes away when the movement stops.
+  await strip.evaluate(n => { n.scrollLeft = 80 })
+  await page.waitForFunction(() => document.querySelector('#s1 .ub-strip').classList.contains('is-scrolling'))
+  await page.waitForFunction(() => !document.querySelector('#s1 .ub-strip').classList.contains('is-scrolling'))
+  // On a device with a mouse the bar also shows while hovered.
+  const hoverBox = await strip.boundingBox()
+  await page.mouse.move(hoverBox.x + 20, hoverBox.y + hoverBox.height / 2)
+  assert.match(await strip.evaluate(n => getComputedStyle(n).scrollbarColor), /rgba\(127, 127, 127, 0\.4\)/)
+  // A vertical wheel scrolls it sideways (from the start, so the row's length does not matter).
+  await strip.evaluate(n => { n.scrollLeft = 0 })
+  await page.waitForTimeout(800)
+  const before = await strip.evaluate(n => n.scrollLeft)
+  const box = await strip.boundingBox()
+  await page.mouse.move(box.x + 50, box.y + box.height / 2)
+  await page.mouse.wheel(0, 120)
+  await page.waitForFunction(start => document.querySelector('#s1 .ub-strip').scrollLeft > start, before)
+  // Collapsing one strip collapses the other and is remembered; expanding re-binds the scroller.
+  await page.locator('#s1 .ub-strip-toggle').click()
+  await page.locator('#s2 .ub-strip').waitFor({ state: 'detached' })
+  assert.equal(await page.evaluate(() => localStorage.getItem('dsh-usage-bars.strip-collapsed')), '1')
+  assert.equal(await page.locator('#s2 .ub-strip-toggle').getAttribute('aria-expanded'), 'false')
+  await page.locator('#s2 .ub-strip-toggle').click()
+  await page.locator('#s1 .ub-strip').waitFor()
+  await page.locator('#s1 .ub-strip').evaluate(n => { n.scrollLeft = 30 })
+  await page.waitForFunction(() => document.querySelector('#s1 .ub-strip').classList.contains('is-scrolling'))
+  // Another tab collapsing it (a storage event) collapses the strips here too.
+  await page.evaluate(() => { localStorage.setItem('dsh-usage-bars.strip-collapsed', '1'); window.dispatchEvent(new StorageEvent('storage', { key: 'dsh-usage-bars.strip-collapsed' })) })
+  await page.locator('#s1 .ub-strip').waitFor({ state: 'detached' })
+  assert.equal(await page.locator('#s1 .ub-strip-toggle').getAttribute('aria-label'), '使用量バー')
+  // A sessionStorage event is not about this setting.
+  // (The stored value is changed quietly first, so that reacting to the wrong event would show.)
+  await page.evaluate(() => { localStorage.setItem('dsh-usage-bars.strip-collapsed', '0'); sessionStorage.clear(); window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: sessionStorage })) })
+  await page.waitForTimeout(200)
+  assert.equal(await page.locator('#s1 .ub-strip').count(), 0, 'still collapsed')
+  await page.evaluate(() => localStorage.setItem('dsh-usage-bars.strip-collapsed', '1'))
+  // Even after this page failed to save once (storage full), another tab's change is still followed.
+  await page.evaluate(() => {
+    const real = Storage.prototype.setItem
+    Storage.prototype.setItem = function () { throw new DOMException('full', 'QuotaExceededError') }
+    document.querySelector('#s1 .ub-strip-toggle').click() // expand; the save fails
+    Storage.prototype.setItem = real
+  })
+  await page.locator('#s1 .ub-strip').waitFor()
+  await page.evaluate(() => { localStorage.setItem('dsh-usage-bars.strip-collapsed', '1'); window.dispatchEvent(new StorageEvent('storage', { key: 'dsh-usage-bars.strip-collapsed', storageArea: localStorage })) })
+  await page.locator('#s1 .ub-strip').waitFor({ state: 'detached' })
+  // Another tab clearing it (settings switched back on there) opens them again.
+  await page.evaluate(() => { localStorage.removeItem('dsh-usage-bars.strip-collapsed'); window.dispatchEvent(new StorageEvent('storage', { key: 'dsh-usage-bars.strip-collapsed', storageArea: localStorage })) })
+  await page.locator('#s1 .ub-strip').waitFor()
+  await page.locator('#s2 .ub-strip').waitFor()
+  await page.evaluate(() => strips.forEach(r => r.unmount()))
+  assert.deepEqual(errors, [])
+  console.log('PASS: strip: overflow scroll shows its bar only while moving, wheel scrolls sideways, collapse syncs across strips and persists, expand re-binds')
 } finally { await browser.close() }

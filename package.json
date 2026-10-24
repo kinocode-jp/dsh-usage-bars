@@ -1,6 +1,6 @@
 {
   "name": "@kinocode/dsh-usage-bars",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Codex / Claude / Antigravity / DeepSeek の残り使用量を、サイドバーのバーで表示する DeepSeek Harness 用プラグイン（CodexBar 風）。",
   "type": "module",
   "main": "lib/index.js",
