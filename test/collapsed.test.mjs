@@ -329,3 +329,54 @@ test('横バー: 使用率の文字色で状態を示す(バーの代わり)', (
   assert.match(css, /\.ub-strip-pct\.over\{color:var\(--dsw-alias-state-error-primary/)
   assert.ok(!css.includes('.ub-strip-item .ub-track'), '横バー用のバー幅指定は不要')
 })
+
+test('横バー: 新規セッションの中央寄せの列でも縮まず、上下が切れない', () => {
+  const css = load().css
+  assert.match(css, /\.ub-strip-wrap\{[^}]*flex:none/, '列の高さが足りなくても縮ませない')
+})
+
+test('横バー: スクロールバーは動かしている間だけ出し、止まれば消す', async () => {
+  const t = load()
+  const strip = t.css.split('\n').find(rule => rule.startsWith('.ub-strip{'))
+  assert.match(strip, /scrollbar-color:transparent transparent/, '止まっているときは透明')
+  assert.match(t.css, /\.ub-strip\.is-scrolling\{scrollbar-color:rgba/, '動かしている間だけ色を付ける')
+  assert.match(t.css, /\.ub-strip::-webkit-scrollbar-thumb\{background:transparent/)
+  const listeners = {}
+  const classes = new Set()
+  const node = {
+    scrollWidth: 800, clientWidth: 300, scrollLeft: 0,
+    classList: { add: c => classes.add(c), remove: c => classes.delete(c) },
+    addEventListener: (type, fn) => { listeners[type] = fn },
+    removeEventListener: type => { delete listeners[type] },
+  }
+  const dispose = t.bindScroller(node)
+  listeners.scroll()
+  assert.ok(classes.has('is-scrolling'), 'スクロール中は表示')
+  await new Promise(resolve => setTimeout(resolve, 760))
+  assert.ok(!classes.has('is-scrolling'), '止まれば消える')
+  assert.equal(typeof listeners.wheel, 'function', '縦ホイールを横に変える')
+  dispose()
+  assert.deepEqual(Object.keys(listeners), [])
+  assert.equal(t.bindScroller(null), undefined)
+})
+
+test('横バー: 表示中も右端のアイコンで折りたためる', () => {
+  const open = load(); open.store.cfg = cfgOf({ strip: true }); open.store.data = stripData()
+  const nodes = render(open.QuotaStrip())
+  const wrap = nodes.find(n => hasClass(n, 'ub-strip-wrap'))
+  assert.ok(wrap && !hasClass(wrap, 'collapsed'))
+  const toggle = wrap.children.at(-1)
+  assert.ok(hasClass(toggle, 'ub-strip-toggle'), 'アイコンは右端(最後の子)')
+  assert.equal(toggle.props['aria-expanded'], true)
+  assert.equal(toggle.props['aria-label'], '使用量を折りたたむ')
+  assert.ok(nodes.some(n => hasClass(n, 'ub-strip-item')))
+
+  const closed = load({ expanded: true }); closed.store.cfg = cfgOf({ strip: true }); closed.store.data = stripData()
+  const shut = render(closed.QuotaStrip())
+  assert.ok(hasClass(shut.find(n => hasClass(n, 'ub-strip-wrap')), 'collapsed'))
+  assert.equal(shut.filter(n => hasClass(n, 'ub-strip-item')).length, 0, '折りたたむと項目を隠す')
+  const reopen = shut.find(n => hasClass(n, 'ub-strip-toggle'))
+  assert.equal(reopen.props['aria-expanded'], false)
+  assert.equal(reopen.props['aria-label'], '使用量を表示')
+  assert.match(closed.css, /\.ub-strip-wrap\.collapsed\{justify-content:flex-end\}/, '畳んでもアイコンは右端')
+})
