@@ -73,6 +73,10 @@ test('Client mounts six DSH methods automatically, cleans remote contribution an
   })
   assert.equal(CONTRIBUTION.descriptors.length, 6); assert.equal(registrations.length, 4, 'the usage service list lives in the usage settings section, not the Models footer')
   assert.ok(!registrations.some(options => options.name === 'settings.models.footer'))
+  // The strip leads the dock above the composer, ahead of DSH's todo (0), goal (10) and queue (20) rows.
+  const strip = registrations.find(options => options.id === 'usage-bars-strip')
+  assert.equal(strip.name, 'conversation.input.dock')
+  assert.ok(strip.order < 0, 'order ' + strip.order + ' sorts before every stock dock row')
   assert.deepEqual(removals, ['dsh-usage-bars.connection-token'])
   assert.equal((await module.__test.call('getConfig')).refreshSeconds, 60)
   cleanups.forEach(off => off()); assert.equal(unmounted, 1); assert.equal(store.cfg, null)
